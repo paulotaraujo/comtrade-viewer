@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtualenv
+.venv/
+env/
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Releases / pacotes grandes
+releases/
+*.zip
+*.tar.gz
+*.AppImage
+*.exe
+*.msi
+
+# Releases / pacotes grandes
+releases/
+*.zip
+*.tar.gz
+*.AppImage
+*.exe
+*.msi
