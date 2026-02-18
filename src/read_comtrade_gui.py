@@ -1486,6 +1486,72 @@ class ComtradeViewer(QMainWindow):
             "\n".join(p.name for p in out_dir.iterdir())
         )
 
+
+    def _fit_binary_int16(self, raw_sel: np.ndarray, new_cfg: Cfg) -> Tuple[np.ndarray, Cfg]:
+        """
+        Export BINARY (16-bit): evita 'cortar picos' quando o raw ultrapassa int16.
+
+        Se algum canal tiver |raw| > 32767, aplica um fator inteiro s (>=2):
+            raw_out = round(raw_in / s)
+        e compensa no CFG multiplicando o coeficiente 'a' por s (b não muda),
+        pois: y = a*X + b  =>  a*(X) == (a*s)*(X/s).
+
+        Também força min/max para [-32768, 32767] no CFG exportado.
+        """
+        raw = np.asarray(raw_sel)
+        if raw.ndim != 2 or new_cfg is None or raw.shape[1] != int(new_cfg.na):
+            return raw_sel, new_cfg
+
+        raw64 = raw.astype(np.int64, copy=False)
+        raw_out = raw64.copy()
+
+        new_analogs: List[AnaDef] = []
+        for i, a in enumerate(new_cfg.analogs):
+            col = raw64[:, i]
+            maxabs = int(np.max(np.abs(col))) if col.size else 0
+
+            s = 1
+            if maxabs > 32767:
+                s = int(math.ceil(maxabs / 32767.0))
+                if s < 2:
+                    s = 2
+                raw_out[:, i] = np.rint(col / s).astype(np.int64)
+
+            new_analogs.append(AnaDef(
+                idx=a.idx,
+                name=a.name,
+                phase=a.phase,
+                units=a.units,
+                a=float(a.a) * float(s),
+                b=float(a.b),
+                skew=a.skew,
+                min_level=-32768,
+                max_level=32767,
+                pri=1.0,
+                sec=1.0,
+                pri_sec="P",
+            ))
+
+        cfg2 = Cfg(
+            station=new_cfg.station,
+            revision=new_cfg.revision,
+            version=new_cfg.version,
+            total=new_cfg.total,
+            na=new_cfg.na,
+            nd=new_cfg.nd,
+            freq=new_cfg.freq,
+            fs=new_cfg.fs,
+            samples=new_cfg.samples,
+            start_dt=new_cfg.start_dt,
+            end_dt=new_cfg.end_dt,
+            file_type=new_cfg.file_type,
+            time_mult=new_cfg.time_mult,
+            analogs=new_analogs,
+            digitals=new_cfg.digitals,
+        )
+        return raw_out.astype(np.int32), cfg2
+
+
     # ---------- Export BINARY (.cfg+.bdat) ----------
     def export_selected_binary(self, ts_mode: str = "i"):
         if self.cfg is None or self.t is None or self.analog_raw is None:
@@ -1519,9 +1585,14 @@ class ComtradeViewer(QMainWindow):
 
         new_cfg = self._build_export_cfg_and_raw(names, t_sel, raw_sel)
         new_cfg.file_type = "BINARY"
+
+        # BINARY é 16-bit nos analógicos; se algum raw ultrapassar int16, isso "corta" o pico.
+        # Então ajustamos raw e compensamos no coeficiente 'a' do CFG exportado.
+        raw_fit, cfg_fit = self._fit_binary_int16(raw_sel, new_cfg)
+
         try:
-            write_cfg(new_cfg, out_cfg)
-            write_bdat_binary(out_bdat, t_sel, raw_sel, new_cfg, ts_mode=ts_mode)
+            write_cfg(cfg_fit, out_cfg)
+            write_bdat_binary(out_bdat, t_sel, raw_fit, cfg_fit, ts_mode=ts_mode)
         except Exception as e:
             QMessageBox.critical(self, "Exportar", f"Falha ao exportar:\n{e}")
             return
